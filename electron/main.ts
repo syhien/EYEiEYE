@@ -236,21 +236,35 @@ async function isExternalFullscreen(): Promise<boolean> {
 
     const display = screen.getDisplayMatching(aw.bounds)
     const d = display.bounds
+    const w = display.workArea
     const b = aw.bounds
 
     // 判定逻辑：
-    // 1. 窗口大小几乎等于显示器大小
-    // 2. 或者窗口覆盖了显示器 95% 以上的面积（处理一些边界稍微溢出的全屏游戏）
-    const epsilon = 10 
+    
+    // 1. 排除最大化窗口：如果窗口完全在工作区(workArea)内，且工作区小于屏幕(说明有任务栏)，则视为非全屏
+    // 这样可以解决 Chrome 最大化时被误判为全屏的问题
+    if (
+      (d.width !== w.width || d.height !== w.height) &&
+      b.x >= w.x - 2 && 
+      b.y >= w.y - 2 && 
+      b.width <= w.width + 4 && 
+      b.height <= w.height + 4
+    ) {
+      return false
+    }
+
+    // 2. 严格的全屏判断：窗口大小几乎等于显示器大小
+    const epsilon = 5 
     const isFullscreenSize = 
       Math.abs(b.width - d.width) <= epsilon && 
       Math.abs(b.height - d.height) <= epsilon &&
       Math.abs(b.x - d.x) <= epsilon &&
       Math.abs(b.y - d.y) <= epsilon
 
+    // 3. 覆盖面积判断：提高阈值到 98%
     const windowArea = b.width * b.height
     const displayArea = d.width * d.height
-    const coversMost = windowArea >= displayArea * 0.95 && 
+    const coversMost = windowArea >= displayArea * 0.98 && 
                       b.x < d.x + d.width && 
                       b.x + b.width > d.x
 
