@@ -1,4 +1,4 @@
-# eyesONyou
+# EYEiEYE
 
 一个 Windows 托盘常驻的眨眼 / 休息提醒软件。
 

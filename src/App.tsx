@@ -32,8 +32,8 @@ function SettingsView() {
     ;(async () => {
       try {
         const [settings, status] = await Promise.all([
-          window.eyesOnYou.getSettings(),
-          window.eyesOnYou.getStatus(),
+          window.eyeieye.getSettings(),
+          window.eyeieye.getStatus(),
         ])
         if (!mounted) return
         setForm(settings)
@@ -57,7 +57,7 @@ function SettingsView() {
         bigDurationMinutes: clampInt(form.bigDurationMinutes, 1, 30),
         openAtLogin: Boolean(form.openAtLogin),
       }
-      await window.eyesOnYou.setSettings(normalized)
+      await window.eyeieye.setSettings(normalized)
       setForm(normalized)
     } finally {
       setSaving(false)
@@ -67,7 +67,7 @@ function SettingsView() {
   async function togglePaused() {
     const next = !paused
     setPaused(next)
-    await window.eyesOnYou.setPaused(next)
+    await window.eyeieye.setPaused(next)
   }
 
   if (loading) {
@@ -452,7 +452,7 @@ function RestView() {
             variant="ghost"
             className="text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 rounded-full px-10 py-6 text-base font-bold transition-all hover:scale-105 active:scale-95"
             onClick={() => {
-              void window.eyesOnYou.exitRest()
+              void window.eyeieye.exitRest()
             }}
           >
             我有急事，跳过休息

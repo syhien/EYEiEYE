@@ -230,7 +230,7 @@ async function isExternalFullscreen(): Promise<boolean> {
     // 排除掉我们自己的窗口，避免干扰判断
     const title = (aw.title || '').toLowerCase()
     const owner = (aw.owner?.name || '').toLowerCase()
-    if (title.includes('eyesonyou') || owner.includes('eyesonyou')) {
+    if (title.includes('eyeieye') || owner.includes('eyeieye')) {
       return false
     }
 

@@ -23,7 +23,7 @@ declare namespace NodeJS {
 
 // Used in Renderer process, exposed in `preload.ts`
 interface Window {
-  eyesOnYou: {
+  eyeieye: {
     getSettings: () => Promise<import('../src/shared/types').Settings>
     setSettings: (settings: import('../src/shared/types').Settings) => Promise<import('../src/shared/types').Settings>
     getStatus: () => Promise<import('../src/shared/types').AppStatus>

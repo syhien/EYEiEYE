@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppStatus, Settings } from '../src/shared/types'
 
-contextBridge.exposeInMainWorld('eyesOnYou', {
+contextBridge.exposeInMainWorld('eyeieye', {
   getSettings(): Promise<Settings> {
     return ipcRenderer.invoke('settings:get')
   },
