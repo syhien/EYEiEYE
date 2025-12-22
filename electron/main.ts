@@ -230,15 +230,18 @@ function showSettingsWindow() {
 async function getRunningApps() {
   if (process.platform === 'win32') {
     try {
-      // 使用 PowerShell 获取进程列表，输出 JSON 格式，避免编码问题
-      // 筛选有窗口标题的进程，并获取 Path 以便提取完整的 exe 文件名
-      const cmd = `powershell -NoProfile -Command "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object Name, MainWindowTitle, Id, Path | ConvertTo-Json -Compress"`
+      // 使用 PowerShell 获取进程列表
+      // 为了彻底解决中文乱码问题，我们在 PS 端将 JSON 编码为 Base64，然后在 Node 端解码
+      const cmd = `powershell -NoProfile -Command "$json = Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object Name, MainWindowTitle, Id, Path | ConvertTo-Json -Compress; [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))"`
       const { stdout } = await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 }) // 增加 buffer 防止截断
       
       if (!stdout.trim()) return []
 
+      // 解码 Base64 内容
+      const jsonString = Buffer.from(stdout.trim(), 'base64').toString('utf-8')
+
       // PowerShell ConvertTo-Json 在只有一个结果时返回对象，多个结果返回数组
-      let rawApps: any = JSON.parse(stdout)
+      let rawApps: any = JSON.parse(jsonString)
       if (!Array.isArray(rawApps)) {
         rawApps = [rawApps]
       }
