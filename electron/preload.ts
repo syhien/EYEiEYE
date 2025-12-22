@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('eyeieye', {
     return ipcRenderer.invoke('status:setPaused', paused)
   },
 
+  getRunningApps(): Promise<{ name: string; title: string; pid: number }[]> {
+    return ipcRenderer.invoke('apps:getRunning')
+  },
+
   exitRest(): Promise<{ ok: boolean }> {
     return ipcRenderer.invoke('rest:exit')
   },

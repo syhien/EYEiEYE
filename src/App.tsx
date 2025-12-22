@@ -26,6 +26,36 @@ function SettingsView() {
   const [saving, setSaving] = useState(false)
   const [paused, setPaused] = useState(false)
   const [form, setForm] = useState<Settings>(DEFAULT_SETTINGS)
+  
+  const [showProcessModal, setShowProcessModal] = useState(false)
+  const [runningApps, setRunningApps] = useState<{ name: string; title: string; pid: number }[]>([])
+  const [loadingApps, setLoadingApps] = useState(false)
+
+  async function openProcessModal() {
+    setShowProcessModal(true)
+    setLoadingApps(true)
+    try {
+      const apps = await window.eyeieye.getRunningApps()
+      setRunningApps(apps)
+    } finally {
+      setLoadingApps(false)
+    }
+  }
+
+  function addProcess(name: string) {
+    setForm(s => {
+      if (s.processBlocklist?.includes(name)) return s
+      return { ...s, processBlocklist: [...(s.processBlocklist || []), name] }
+    })
+    setShowProcessModal(false)
+  }
+
+  function removeProcess(name: string) {
+    setForm(s => ({
+      ...s,
+      processBlocklist: s.processBlocklist?.filter(p => p !== name) || []
+    }))
+  }
 
   useEffect(() => {
     let mounted = true
@@ -56,6 +86,7 @@ function SettingsView() {
         bigIntervalMinutes: clampInt(form.bigIntervalMinutes, 5, 480),
         bigDurationMinutes: clampInt(form.bigDurationMinutes, 1, 30),
         openAtLogin: Boolean(form.openAtLogin),
+        processBlocklist: form.processBlocklist || [],
       }
       await window.eyeieye.setSettings(normalized)
       setForm(normalized)
@@ -213,6 +244,45 @@ function SettingsView() {
               className="data-[state=checked]:bg-primary"
             />
           </div>
+
+          {/* 进程屏蔽部分 */}
+          <div className="space-y-5 p-6 rounded-[32px] bg-muted/30 border border-muted-foreground/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-bold text-foreground/80">
+                <div className="h-4 w-1 bg-foreground/30 rounded-full" />
+                免打扰模式
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={openProcessModal}
+                className="h-7 text-xs rounded-full px-3"
+              >
+                + 添加进程
+              </Button>
+            </div>
+            
+            <div className="space-y-2">
+              {(!form.processBlocklist || form.processBlocklist.length === 0) && (
+                <div className="text-xs text-muted-foreground/60 text-center py-2">
+                  暂无屏蔽进程，点击上方按钮添加
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {form.processBlocklist?.map(proc => (
+                  <div key={proc} className="flex items-center gap-1 pl-3 pr-1 py-1 rounded-full bg-background border text-xs font-medium shadow-sm group">
+                    {proc}
+                    <button 
+                      onClick={() => removeProcess(proc)}
+                      className="h-5 w-5 rounded-full flex items-center justify-center hover:bg-destructive hover:text-destructive-foreground transition-colors"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </CardContent>
         <CardFooter className="flex items-center justify-between gap-4 bg-muted/20 p-8">
           <Button 
@@ -227,6 +297,54 @@ function SettingsView() {
           </Button>
         </CardFooter>
       </Card>
+
+      {/* 进程选择弹窗 */}
+      {showProcessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
+          <Card className="w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl">
+            <CardHeader className="pb-4 border-b">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">选择要屏蔽的进程</CardTitle>
+                <Button variant="ghost" size="sm" onClick={() => setShowProcessModal(false)}>关闭</Button>
+              </div>
+              <CardDescription>当这些程序在前台运行时，将暂停提醒</CardDescription>
+            </CardHeader>
+            <div className="flex-1 overflow-y-auto p-2">
+              {loadingApps ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <span className="animate-pulse">正在扫描运行中的程序...</span>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {runningApps.map((app) => (
+                    <button
+                      key={`${app.name}-${app.pid}`}
+                      onClick={() => addProcess(app.name)}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 text-left transition-colors group"
+                    >
+                      <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                        {app.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate text-sm">{app.title}</div>
+                        <div className="text-xs text-muted-foreground truncate">{app.name}</div>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 text-xs font-bold text-primary px-2 py-1 rounded-full bg-primary/10">
+                        添加
+                      </div>
+                    </button>
+                  ))}
+                  {runningApps.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      未找到有窗口的程序
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

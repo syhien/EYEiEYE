@@ -6,6 +6,7 @@ export interface Settings {
   bigIntervalMinutes: number
   bigDurationMinutes: number
   openAtLogin: boolean
+  processBlocklist: string[]
 }
 
 export interface AppStatus {
@@ -18,4 +19,5 @@ export const DEFAULT_SETTINGS: Settings = {
   bigIntervalMinutes: 60,
   bigDurationMinutes: 3,
   openAtLogin: false,
+  processBlocklist: [],
 }

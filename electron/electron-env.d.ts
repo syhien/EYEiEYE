@@ -28,6 +28,7 @@ interface Window {
     setSettings: (settings: import('../src/shared/types').Settings) => Promise<import('../src/shared/types').Settings>
     getStatus: () => Promise<import('../src/shared/types').AppStatus>
     setPaused: (paused: boolean) => Promise<import('../src/shared/types').AppStatus>
+    getRunningApps: () => Promise<{ name: string; title: string; pid: number }[]>
     exitRest: () => Promise<{ ok: boolean }>
   }
 }

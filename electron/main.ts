@@ -2,10 +2,14 @@ import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, screen, ipcM
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import { exec } from 'node:child_process'
+import { promisify } from 'node:util'
 import activeWin from 'active-win'
 import { Resvg } from '@resvg/resvg-js'
 
 import { DEFAULT_SETTINGS, type AppStatus, type Settings } from '../src/shared/types'
+
+const execAsync = promisify(exec)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -50,6 +54,7 @@ function normalizeSettings(input: Partial<Settings> | undefined | null): Setting
     bigIntervalMinutes: Math.trunc(clampNumber(base.bigIntervalMinutes, 5, 480, DEFAULT_SETTINGS.bigIntervalMinutes)),
     bigDurationMinutes: Math.trunc(clampNumber(base.bigDurationMinutes, 1, 30, DEFAULT_SETTINGS.bigDurationMinutes)),
     openAtLogin: Boolean((base as Settings).openAtLogin),
+    processBlocklist: Array.isArray(base.processBlocklist) ? base.processBlocklist : [],
   }
 }
 
@@ -222,6 +227,66 @@ function showSettingsWindow() {
   settingsWindow?.focus()
 }
 
+async function getRunningApps() {
+  if (process.platform === 'win32') {
+    try {
+      // 使用 PowerShell 获取进程列表，输出 JSON 格式，避免编码问题
+      // 筛选有窗口标题的进程，并获取 Path 以便提取完整的 exe 文件名
+      const cmd = `powershell -NoProfile -Command "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object Name, MainWindowTitle, Id, Path | ConvertTo-Json -Compress"`
+      const { stdout } = await execAsync(cmd, { maxBuffer: 1024 * 1024 * 10 }) // 增加 buffer 防止截断
+      
+      if (!stdout.trim()) return []
+
+      // PowerShell ConvertTo-Json 在只有一个结果时返回对象，多个结果返回数组
+      let rawApps: any = JSON.parse(stdout)
+      if (!Array.isArray(rawApps)) {
+        rawApps = [rawApps]
+      }
+
+      const apps = rawApps.map((p: any) => {
+        let name = p.Name
+        // 尝试从 Path 获取完整文件名（带 .exe），与 active-win 保持一致
+        if (p.Path) {
+          name = path.basename(p.Path)
+        } else {
+          // 如果没有 Path（可能权限原因），手动补 .exe
+          name = `${name}.exe`
+        }
+        return {
+          name: name,
+          pid: p.Id,
+          title: p.MainWindowTitle
+        }
+      })
+      
+      const uniqueApps = new Map<string, { name: string, title: string, pid: number }>()
+      for (const app of apps) {
+        if (!uniqueApps.has(app.name)) {
+          uniqueApps.set(app.name, app)
+        }
+      }
+      return Array.from(uniqueApps.values())
+    } catch (e) {
+      console.error('Failed to get running apps', e)
+      return []
+    }
+  }
+  return []
+}
+
+async function isProcessBlocked(settings: Settings): Promise<boolean> {
+  if (!settings.processBlocklist || settings.processBlocklist.length === 0) return false
+  try {
+    const aw = await activeWin()
+    if (!aw || !aw.owner || !aw.owner.name) return false
+    
+    const currentName = aw.owner.name.toLowerCase()
+    return settings.processBlocklist.some(blocked => blocked.toLowerCase() === currentName)
+  } catch {
+    return false
+  }
+}
+
 async function isExternalFullscreen(): Promise<boolean> {
   try {
     const aw = await activeWin()
@@ -277,7 +342,8 @@ async function isExternalFullscreen(): Promise<boolean> {
 
 async function maybeNotifyBeforeRest() {
   if (paused) return
-  if (await isExternalFullscreen()) return
+  const settings = await readSettings()
+  if (await isExternalFullscreen() || await isProcessBlocked(settings)) return
 
   if (Notification.isSupported()) {
     new Notification({
@@ -307,7 +373,7 @@ function getCenteredBounds(width: number, height: number) {
 
 async function showBlinkWindow(settings: Settings) {
   if (paused) return
-  if (await isExternalFullscreen()) return
+  if (await isExternalFullscreen() || await isProcessBlocked(settings)) return
 
   const blink = new BrowserWindow({
     ...getCenteredBounds(640, 360),
@@ -345,7 +411,7 @@ async function showBlinkWindow(settings: Settings) {
 
 async function showRestWindow(settings: Settings) {
   if (paused) return
-  if (await isExternalFullscreen()) return
+  if (await isExternalFullscreen() || await isProcessBlocked(settings)) return
 
   const durationSeconds = settings.bigDurationMinutes * 60
   const rest = new BrowserWindow({
@@ -453,6 +519,8 @@ function registerIpc() {
 
   ipcMain.handle('status:get', async () => ({ paused }))
   ipcMain.handle('status:setPaused', async (_e, next: boolean) => setPaused(Boolean(next)))
+
+  ipcMain.handle('apps:getRunning', async () => getRunningApps())
 
   ipcMain.handle('rest:exit', async () => {
     const current = activeRestWindow
