@@ -11,6 +11,11 @@ node_modules
 dist
 dist-electron
 release
+.turbo
+
+# Tauri / Rust
+src-tauri/target
+
 *.local
 
 # Editor directories and files

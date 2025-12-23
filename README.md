@@ -4,7 +4,7 @@
 
 ## 技术栈
 
-- Electron + Vite + React + TypeScript
+- Tauri (Rust) + Vite + React + TypeScript
 - Tailwind CSS
 - shadcn/ui（以源码组件方式集成在 `src/components/ui/*`）
 
@@ -34,6 +34,5 @@ npm run build
 
 ## 代码入口
 
-- 主进程：`electron/main.ts`
-- 预加载：`electron/preload.ts`
+- Rust 主程序：`src-tauri/src/main.rs`
 - 渲染进程（设置/眨眼/休息三种视图用 query 参数区分）：`src/App.tsx`

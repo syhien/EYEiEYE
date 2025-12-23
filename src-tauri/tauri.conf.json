@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/tooling/cli/schema.json",
+  "package": {
+    "productName": "EYEiEYE",
+    "version": "0.0.0"
+  },
+  "build": {
+    "beforeDevCommand": "npm run dev:web",
+    "beforeBuildCommand": "npm run build:web",
+    "devPath": "http://localhost:5173",
+    "distDir": "../dist"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false
+    },
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.eyeieye.app",
+      "icon": [
+        "icons/icon.ico",
+        "icons/icon.png"
+      ]
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "EYEiEYE",
+        "width": 680,
+        "height": 720,
+        "resizable": false,
+        "fullscreen": false,
+        "transparent": true,
+        "decorations": true,
+        "visible": false
+      }
+    ]
+  }
+}

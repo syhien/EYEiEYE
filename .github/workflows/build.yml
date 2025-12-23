@@ -36,14 +36,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EYEiEYE-Windows
-          path: release/0.0.0/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.blockmap
+            src-tauri/target/release/bundle/msi/*.msi
 
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            release/0.0.0/*.exe
-            release/0.0.0/*.blockmap
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.blockmap
+            src-tauri/target/release/bundle/msi/*.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

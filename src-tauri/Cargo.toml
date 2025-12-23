@@ -1,0 +1,38 @@
+[package]
+name = "eyeieye"
+version = "0.0.0"
+description = "EYEiEYE - tray blink/rest reminder"
+authors = ["you"]
+edition = "2021"
+
+build = "build.rs"
+
+[build-dependencies]
+tauri-build = { version = "1", features = [] }
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+# Core
+
+tauri = { version = "1", features = [] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = { version = "0.52" }
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+  "Win32_System_ProcessStatus",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+] }
+winrt-notification = "0.5"
+
+
+[features]
+default = ["custom-protocol", "tray"]
+custom-protocol = ["tauri/custom-protocol"]
+tray = ["tauri/system-tray"]
