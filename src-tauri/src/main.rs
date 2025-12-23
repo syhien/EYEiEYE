@@ -2,6 +2,7 @@
 
 use std::{
   collections::HashMap,
+  io::Write,
   path::PathBuf,
   sync::{
     atomic::{AtomicBool, Ordering},
@@ -702,6 +703,39 @@ fn rest_exit(app: tauri::AppHandle, state: tauri::State<RuntimeState>) -> serde_
 }
 
 fn main() {
+  fn startup_log_path() -> PathBuf {
+    std::env::temp_dir().join("EYEiEYE-startup.log")
+  }
+
+  fn log_startup(line: &str) {
+    let ts = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_secs();
+    let msg = format!("[{ts}] {line}\n");
+    let path = startup_log_path();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+      let _ = f.write_all(msg.as_bytes());
+    }
+  }
+
+  std::panic::set_hook(Box::new(|info| {
+    let mut line = String::from("panic: ");
+    if let Some(s) = info.payload().downcast_ref::<&str>() {
+      line.push_str(s);
+    } else if let Some(s) = info.payload().downcast_ref::<String>() {
+      line.push_str(s);
+    } else {
+      line.push_str("<non-string payload>");
+    }
+    if let Some(loc) = info.location() {
+      line.push_str(&format!(" @ {}:{}", loc.file(), loc.line()));
+    }
+    log_startup(&line);
+  }));
+
+  log_startup("starting app");
+
   let (tx, rx) = watch::channel(0u64);
   let state = RuntimeState {
     paused: Arc::new(AtomicBool::new(false)),
@@ -711,7 +745,7 @@ fn main() {
 
   let tray = SystemTray::new().with_menu(build_tray_menu(false));
 
-  tauri::Builder::default()
+  let builder = tauri::Builder::default()
     .manage(state.clone())
     .system_tray(tray)
     .on_system_tray_event(move |app, event| {
@@ -748,6 +782,8 @@ fn main() {
       rest_exit
     ])
     .setup(move |app| {
+      log_startup("setup start");
+
       // Make sure main window never quits the app; hide instead.
       if let Some(w) = app.get_window("main") {
         let _ = w.on_window_event(|event| {
@@ -766,8 +802,17 @@ fn main() {
       start_scheduler(app.handle(), state.clone(), rx);
       state.reset_scheduler();
 
+      log_startup("setup done");
+
       Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    });
+
+  match builder.run(tauri::generate_context!()) {
+    Ok(()) => {
+      log_startup("app exited normally");
+    }
+    Err(e) => {
+      log_startup(&format!("tauri run error: {e}"));
+    }
+  }
 }
