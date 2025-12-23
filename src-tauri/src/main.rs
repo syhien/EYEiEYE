@@ -419,17 +419,43 @@ fn show_settings_window(app: &tauri::AppHandle) {
   }
 }
 
-fn centered_position(width: f64, height: f64) -> Option<(f64, f64)> {
+fn centered_position_with_jitter(width: f64, height: f64, jitter_px: i32) -> Option<(f64, f64)> {
   #[cfg(windows)]
   {
     let (x, y, w, h) = win::cursor_monitor_workarea_center()?;
-    let cx = x as f64 + (w as f64 - width) / 2.0;
-    let cy = y as f64 + (h as f64 - height) / 2.0;
-    Some((cx.round(), cy.round()))
+    let base_x = x as f64 + (w as f64 - width) / 2.0;
+    let base_y = y as f64 + (h as f64 - height) / 2.0;
+
+    let jitter = jitter_px.max(0) as u64;
+    let seed = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .unwrap_or_default()
+      .as_nanos() as u64;
+
+    let range = jitter * 2 + 1;
+    let dx = if jitter == 0 { 0i64 } else { (seed % range) as i64 - jitter as i64 };
+    let dy = if jitter == 0 { 0i64 } else { ((seed / 1_000_003) % range) as i64 - jitter as i64 };
+
+    let mut px = base_x + dx as f64;
+    let mut py = base_y + dy as f64;
+
+    let min_x = x as f64;
+    let min_y = y as f64;
+    let max_x = (x + w) as f64 - width;
+    let max_y = (y + h) as f64 - height;
+
+    if max_x >= min_x {
+      px = px.clamp(min_x, max_x);
+    }
+    if max_y >= min_y {
+      py = py.clamp(min_y, max_y);
+    }
+
+    Some((px.round(), py.round()))
   }
   #[cfg(not(windows))]
   {
-    let _ = (width, height);
+    let _ = (width, height, jitter_px);
     None
   }
 }
@@ -478,7 +504,8 @@ async fn show_blink_window(app: tauri::AppHandle, state: RuntimeState, settings:
   let w = 640.0;
   let h = 360.0;
   builder = builder.inner_size(w, h);
-  if let Some((x, y)) = centered_position(w, h) {
+  // Feature: randomize around center a bit (still clamped to work area).
+  if let Some((x, y)) = centered_position_with_jitter(w, h, 140) {
     builder = builder.position(x, y);
   }
 
@@ -786,9 +813,11 @@ fn main() {
 
       // Make sure main window never quits the app; hide instead.
       if let Some(w) = app.get_window("main") {
-        let _ = w.on_window_event(|event| {
+        let w2 = w.clone();
+        let _ = w.on_window_event(move |event| {
           if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
+            let _ = w2.hide();
           }
         });
         let _ = w.hide();
