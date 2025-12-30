@@ -1,7 +1,7 @@
 {
   "name": "eyeieye",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "A Windows tray blink/rest reminder built with Tauri (Rust) + Vite + React + TypeScript",
   "type": "module",
   "scripts": {

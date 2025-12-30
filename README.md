@@ -30,7 +30,7 @@ npm run dev
 npm run build
 ```
 
-构建产物会输出到 `release/<version>/`。
+构建产物默认输出到 `src-tauri/target/release/bundle/`（如 `msi/`、`nsis/`）。
 
 ## 代码入口
 

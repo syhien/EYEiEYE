@@ -127,18 +127,27 @@ fn apply_autostart(_open_at_login: bool) -> anyhow::Result<()> {
 
 #[derive(Clone)]
 struct RuntimeState {
-  paused: Arc<AtomicBool>,
+  manual_paused: Arc<AtomicBool>,
+  screen_paused: Arc<AtomicBool>,
   rest_allow_close: Arc<AtomicBool>,
   scheduler_tx: watch::Sender<u64>,
 }
 
 impl RuntimeState {
   fn is_paused(&self) -> bool {
-    self.paused.load(Ordering::SeqCst)
+    self.manual_paused.load(Ordering::SeqCst) || self.screen_paused.load(Ordering::SeqCst)
   }
 
-  fn set_paused(&self, paused: bool) {
-    self.paused.store(paused, Ordering::SeqCst);
+  fn is_manual_paused(&self) -> bool {
+    self.manual_paused.load(Ordering::SeqCst)
+  }
+
+  fn set_manual_paused(&self, paused: bool) {
+    self.manual_paused.store(paused, Ordering::SeqCst);
+  }
+
+  fn set_screen_paused(&self, paused: bool) {
+    self.screen_paused.store(paused, Ordering::SeqCst);
   }
 
   fn reset_scheduler(&self) {
@@ -163,9 +172,12 @@ mod win {
     os::windows::ffi::OsStringExt,
   };
 
+  use windows::core::GUID;
+
   use windows::Win32::{
-    Foundation::{BOOL, HWND, LPARAM, POINT, RECT},
+    Foundation::{BOOL, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST},
+    System::Power::{RegisterPowerSettingNotification, UnregisterPowerSettingNotification},
     System::{
       ProcessStatus::K32GetModuleFileNameExW,
       Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ},
@@ -173,8 +185,142 @@ mod win {
     UI::WindowsAndMessaging::{
       EnumWindows, GetCursorPos, GetForegroundWindow, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
       GetWindowThreadProcessId, IsWindowVisible,
+      CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, GetWindowLongPtrW, RegisterClassW,
+      SetWindowLongPtrW, TranslateMessage, CREATESTRUCTW, GWLP_USERDATA, HMENU, HWND_MESSAGE, MSG, WNDCLASSW,
+      WM_NCCREATE, WM_NCDESTROY,
+      REGISTER_NOTIFICATION_FLAGS,
+      WINDOW_EX_STYLE,
     },
   };
+
+  // These are not exposed as constants in windows 0.58 bindings.
+  const WM_POWERBROADCAST_U32: u32 = 0x0218;
+  const PBT_POWERSETTINGCHANGE_USIZE: usize = 0x8013;
+  const DEVICE_NOTIFY_WINDOW_HANDLE_U32: u32 = 0;
+
+  // GUID_CONSOLE_DISPLAY_STATE
+  // https://learn.microsoft.com/windows/win32/power/power-setting-guids
+  const GUID_CONSOLE_DISPLAY_STATE: GUID = GUID::from_values(
+    0x6fe69556,
+    0x704a,
+    0x47a0,
+    [0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47],
+  );
+
+  #[repr(C)]
+  struct POWERBROADCAST_SETTING {
+    power_setting: GUID,
+    data_length: u32,
+    data: [u8; 1],
+  }
+
+  struct DisplayMonitorContext {
+    state: RuntimeState,
+  }
+
+  unsafe extern "system" fn display_monitor_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+      WM_NCCREATE => {
+        let cs = &*(lparam.0 as *const CREATESTRUCTW);
+        let ctx_ptr = cs.lpCreateParams as *mut DisplayMonitorContext;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, ctx_ptr as isize);
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+      }
+      m if m == WM_POWERBROADCAST_U32 => {
+        if wparam.0 == PBT_POWERSETTINGCHANGE_USIZE {
+          let ctx_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut DisplayMonitorContext;
+          if !ctx_ptr.is_null() {
+            let pbs = &*(lparam.0 as *const POWERBROADCAST_SETTING);
+            if pbs.power_setting == GUID_CONSOLE_DISPLAY_STATE {
+              // 0 = off, 1 = on, 2 = dim
+              let value = pbs.data[0];
+              let screen_off = value == 0;
+              let ctx = &*ctx_ptr;
+              let prev = ctx.state.screen_paused.load(Ordering::SeqCst);
+              if prev != screen_off {
+                ctx.state.set_screen_paused(screen_off);
+                ctx.state.reset_scheduler();
+              }
+            }
+          }
+        }
+        return LRESULT(1);
+      }
+      WM_NCDESTROY => {
+        let ctx_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut DisplayMonitorContext;
+        if !ctx_ptr.is_null() {
+          drop(Box::from_raw(ctx_ptr));
+          SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+      }
+      _ => {}
+    }
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+  }
+
+  pub fn start_display_state_monitor(state: RuntimeState) {
+    std::thread::spawn(move || unsafe {
+      let class_name: Vec<u16> = "EYEiEYE_DisplayMonitor\0".encode_utf16().collect();
+
+      let wc = WNDCLASSW {
+        lpfnWndProc: Some(display_monitor_wndproc),
+        lpszClassName: windows::core::PCWSTR(class_name.as_ptr()),
+        ..Default::default()
+      };
+
+      if RegisterClassW(&wc) == 0 {
+        return;
+      }
+
+      let ctx = Box::new(DisplayMonitorContext { state });
+      let ctx_ptr = Box::into_raw(ctx);
+
+      let hwnd = match CreateWindowExW(
+        WINDOW_EX_STYLE(0),
+        windows::core::PCWSTR(class_name.as_ptr()),
+        windows::core::PCWSTR(class_name.as_ptr()),
+        windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0),
+        0,
+        0,
+        0,
+        0,
+        HWND_MESSAGE,
+        HMENU::default(),
+        None,
+        Some(ctx_ptr as *const _),
+      ) {
+        Ok(hwnd) => hwnd,
+        Err(_) => {
+          drop(Box::from_raw(ctx_ptr));
+          return;
+        }
+      };
+
+      let recipient = windows::Win32::Foundation::HANDLE(hwnd.0);
+      let reg = RegisterPowerSettingNotification(
+        recipient,
+        &GUID_CONSOLE_DISPLAY_STATE,
+        REGISTER_NOTIFICATION_FLAGS(DEVICE_NOTIFY_WINDOW_HANDLE_U32),
+      );
+      let notification_handle = match reg {
+        Ok(h) => h,
+        Err(_) => {
+          let _ = DestroyWindow(hwnd);
+          return;
+        }
+      };
+
+      let mut msg = MSG::default();
+      while GetMessageW(&mut msg, HWND(std::ptr::null_mut()), 0, 0).into() {
+        let _ = TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+
+      let _ = UnregisterPowerSettingNotification(notification_handle);
+      let _ = DestroyWindow(hwnd);
+    });
+  }
 
   fn wide_to_string(buf: &[u16]) -> String {
     let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
@@ -701,9 +847,9 @@ fn status_get(state: tauri::State<RuntimeState>) -> AppStatus {
 
 #[tauri::command]
 fn status_set_paused(state: tauri::State<RuntimeState>, paused: bool) -> AppStatus {
-  state.set_paused(paused);
+  state.set_manual_paused(paused);
   state.reset_scheduler();
-  AppStatus { paused }
+  AppStatus { paused: state.is_paused() }
 }
 
 #[tauri::command]
@@ -765,7 +911,8 @@ fn main() {
 
   let (tx, rx) = watch::channel(0u64);
   let state = RuntimeState {
-    paused: Arc::new(AtomicBool::new(false)),
+    manual_paused: Arc::new(AtomicBool::new(false)),
+    screen_paused: Arc::new(AtomicBool::new(false)),
     rest_allow_close: Arc::new(AtomicBool::new(false)),
     scheduler_tx: tx,
   };
@@ -783,15 +930,15 @@ fn main() {
           }
           "toggle_paused" => {
             let st = app.state::<RuntimeState>();
-            let next = !st.is_paused();
-            st.set_paused(next);
+            let next_manual = !st.is_manual_paused();
+            st.set_manual_paused(next_manual);
             st.reset_scheduler();
 
             // Update menu label
             let handle = app.tray_handle();
             let _ = handle
               .get_item("toggle_paused")
-              .set_title(if next { "继续提醒" } else { "暂停提醒" });
+              .set_title(if st.is_paused() { "继续提醒" } else { "暂停提醒" });
           }
           "quit" => {
             std::process::exit(0);
@@ -830,6 +977,12 @@ fn main() {
       // Start scheduler (idle until first reset)
       start_scheduler(app.handle(), state.clone(), rx);
       state.reset_scheduler();
+
+      // Pause timers when the screen turns off (Windows only)
+      #[cfg(windows)]
+      {
+        win::start_display_state_monitor(state.clone());
+      }
 
       log_startup("setup done");
 
